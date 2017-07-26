@@ -1,0 +1,43 @@
+plugins {
+    id "net.ltgt.apt" version "0.10"
+}
+
+group "fr.gn"
+version "0.1-SNAPSHOT"
+
+apply plugin: "net.ltgt.apt"
+apply plugin: "java"
+apply plugin: "idea"
+apply plugin: "maven"
+apply plugin: "osgi"
+
+sourceCompatibility = 1.8
+
+ext {
+    isSnapshot = true
+    d4jFJBaseVersion = "0.2"
+
+    snapshotAppendix = "-SNAPSHOT"
+    d4jFJVersion = d4jFJBaseVersion + (isSnapshot ? snapshotAppendix : "")
+
+    dependencyAutoService = "com.google.auto.service:auto-service:1.0-rc2"
+}
+
+repositories {
+    mavenLocal()
+    jcenter()
+    mavenCentral()
+    maven {
+        url "https://plugins.gradle.org/m2/"
+    }
+}
+
+dependencies {
+    compileOnly "org.derive4j:derive4j-processor-api:0.12.0"
+    compileOnly dependencyAutoService
+    apt dependencyAutoService
+
+    compileOnly "com.fasterxml.jackson.core:jackson-databind:2.8.9"
+    compileOnly files("/usr/local/src/functionaljava/core/build/libs/functionaljava_1.8-4.8-SNAPSHOT.jar")
+    compileOnly "org.derive4j.hkt:hkt:0.9.3-SNAPSHOT"
+}

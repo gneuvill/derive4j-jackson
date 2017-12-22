@@ -8,10 +8,11 @@ import org.derive4j.processor.api.*;
 import org.derive4j.processor.api.model.AlgebraicDataType;
 import org.derive4j.processor.api.model.DataArgument;
 
-import javax.lang.model.element.Modifier;
-import javax.lang.model.element.Name;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -24,7 +25,7 @@ public class JacksonDerivations implements DerivatorFactory {
   public List<DerivatorSelection> derivators(DeriveUtils deriveUtils) {
     final ClassName
       stdSerClassName =
-        ClassName.get("com.fasterxml.jackson.databind.ser.std", "StdSerializer"),
+      ClassName.get("com.fasterxml.jackson.databind.ser.std", "StdSerializer"),
 
       stdDeserClassName =
         ClassName.get("com.fasterxml.jackson.databind.deser.std", "StdDeserializer");
@@ -32,146 +33,74 @@ public class JacksonDerivations implements DerivatorFactory {
     final TypeElement
       stdSerType = getTypeElement(deriveUtils, stdSerClassName),
 
-      sdtDeserType = getTypeElement(deriveUtils, stdDeserClassName);
-
-    final DeclaredType
-      wildcardStdSerType = getDeclaredWildcardedType(deriveUtils, stdSerType),
-
-      wildcardStdDeserType = getDeclaredWildcardedType(deriveUtils, sdtDeserType);
+      stdDeserType = getTypeElement(deriveUtils, stdDeserClassName);
 
     final TypeElement
       javaTypesProvider =
-        deriveUtils.elements().getTypeElement(JavaTypes.class.getCanonicalName()),
+      deriveUtils.elements().getTypeElement(JavaTypes.class.getCanonicalName()),
 
       fjTypesProvider =
-        deriveUtils.elements().getTypeElement(FjTypes.class.getCanonicalName()),
-
-      jackTypeRefType =
-        deriveUtils.elements().getTypeElement("com.fasterxml.jackson.core.type.TypeReference"),
-
-      jackTypeFactoryType =
-        deriveUtils.elements().getTypeElement("com.fasterxml.jackson.databind.type.TypeFactory");
+        deriveUtils.elements().getTypeElement(FjTypes.class.getCanonicalName());
 
     return
       asList(selection(stdSerClassName, adt -> genInstance(deriveUtils
         , stdSerClassName
         , stdSerType
-        , wildcardStdSerType
+        , deriveUtils
+          .types()
+          .getDeclaredType(stdSerType, adt.typeConstructor().declaredType())
         , asList(javaTypesProvider, fjTypesProvider)
-        , jackTypeRefType
-        , jackTypeFactoryType
         , adt
         , JacksonDerivations::genSerializerCode))
 
-      , selection(stdDeserClassName, adt -> genInstance(deriveUtils
-        , stdDeserClassName
-        , sdtDeserType
-        , wildcardStdDeserType
-        , asList(javaTypesProvider, fjTypesProvider)
-        , jackTypeRefType
-        , jackTypeFactoryType
-        , adt
-        , (drvUtils, instUtils, mspec) ->
+        , selection(stdDeserClassName, adt -> genInstance(deriveUtils
+          , stdDeserClassName
+          , stdDeserType
+          , deriveUtils
+            .types()
+            .getDeclaredType(stdDeserType, adt.typeConstructor().typeVariables().isEmpty()
+              ? adt.typeConstructor().declaredType()
+              : getDeclaredWildcardedType(deriveUtils, adt.typeConstructor().typeElement()))
+          , asList(javaTypesProvider, fjTypesProvider)
+          , adt
+          , (drvUtils, instUtils, mspec) ->
             genDeserializerCode(drvUtils, instUtils, adt, mspec))));
   }
 
   private static DeriveResult<DerivedCodeSpec> genInstance(DeriveUtils deriveUtils
     , ClassName instanceClassName
     , TypeElement instanceType
-    , DeclaredType wildCardInstanceType
+    , DeclaredType instanceDeclType
     , List<TypeElement> typesProvider
-    , TypeElement jackTypeRefType
-    , TypeElement jackTypeFactoryType
     , AlgebraicDataType adt
-    , F3<DeriveUtils, InstanceUtils, MethodSpec, MethodSpec> genCode) {
+    , F3<DeriveUtils, InstanceUtils, MethodSpec, MethodSpec> genMethodCode) {
     return deriveUtils.generateInstance(adt
       , instanceClassName
       , typesProvider
-      , instanceUtils -> {
-        final DeclaredType instanceDeclType = deriveUtils
-          .types()
-          .getDeclaredType(instanceType, adt.typeConstructor().declaredType());
+      , instanceUtils -> instanceUtils.generateInstanceFactory(CodeBlock
+        .of("($L)\n", instanceType.getSimpleName())
+        .toBuilder()
+        .indent()
+        .add("$L", TypeSpec
+          .anonymousClassBuilder("$T.class"
+            , adt.typeConstructor().declaredType())
 
-        final DeclaredType jackTypeRefDeclType = deriveUtils
-          .types()
-          .getDeclaredType(jackTypeRefType, adt.typeConstructor().declaredType());
+          .superclass(TypeName.get(instanceDeclType))
 
-        final Name adtName = adt.typeConstructor().typeElement().getSimpleName();
+          .addMethods(deriveUtils
+            .allAbstractMethods(instanceType)
+            .stream()
+            .map(m -> {
+              final MethodSpec methodSpec = deriveUtils
+                .overrideMethodBuilder(m, instanceDeclType)
+                .build();
 
-        final String instanceTypeName = adtName + instanceType.getSimpleName().toString();
+              return genMethodCode.f(deriveUtils, instanceUtils, methodSpec);
+            })
+            .collect(Collectors.toList()))
 
-        final String instanceVarName =
-          instanceUtils.adtVariableName() + instanceType.getSimpleName().toString();
-
-        return DerivedCodeSpec
-          .codeSpec(TypeSpec
-              .classBuilder(instanceTypeName)
-
-              .addModifiers(Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
-
-              .addTypeVariables(adt
-                .typeConstructor()
-                .typeVariables()
-                .stream()
-                .map(TypeVariableName::get)
-                .collect(Collectors.toList()))
-
-              .superclass(TypeName.get(instanceDeclType))
-
-              .addMethod(MethodSpec
-                .constructorBuilder()
-                .addModifiers(Modifier.PRIVATE)
-                .addCode("super($T.defaultInstance().$N($L));\n"
-                  , jackTypeFactoryType
-                  , "constructType"
-                  , TypeSpec
-                    .anonymousClassBuilder("")
-                    .superclass(TypeName.get(jackTypeRefDeclType))
-                    .build())
-                .build())
-
-              .addMethods(deriveUtils
-                .allAbstractMethods(instanceType)
-                .stream()
-                .map(m -> {
-                  final MethodSpec methodSpec = deriveUtils
-                    .overrideMethodBuilder(m, instanceDeclType)
-                    .build();
-
-                  return genCode.f(deriveUtils, instanceUtils, methodSpec);
-                })
-                .collect(Collectors.toList()))
-              .build()
-
-            , FieldSpec
-              .builder(TypeName.get(wildCardInstanceType)
-                , instanceVarName
-                , Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
-
-              .initializer("new $N()", instanceTypeName)
-              .build()
-
-            , MethodSpec
-              .methodBuilder(instanceVarName)
-
-              .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
-
-              .addTypeVariables(instanceType
-                .getTypeParameters()
-                .stream()
-                .map(TypeVariableName::get)
-                .collect(Collectors.toList()))
-
-              .returns(TypeName.get(instanceDeclType))
-
-              .addAnnotation(AnnotationSpec
-                .builder(SuppressWarnings.class)
-                .addMember("value", "$S", "unchecked")
-                .build())
-
-              .addCode("return ($T) $N;\n", TypeName.get(instanceDeclType), instanceVarName)
-              .build());
-      });
+          .build())
+        .build()));
   }
 
   private static MethodSpec genSerializerCode(DeriveUtils deriveUtils
@@ -199,21 +128,32 @@ public class JacksonDerivations implements DerivatorFactory {
 
               .add("$N.writeStringField($S, $S);\n"
                 , jacksonGen
-                , "valueConstructor"
+                , "_tag"
                 , dataConstructor.name())
 
               .add(dataConstructor
                 .arguments()
                 .stream()
                 .reduce(CodeBlock.of("\n")
-                  , (cb, darg) -> cb.toBuilder()
-                    .add("$N.writeFieldName($S);\n", jacksonGen, darg.fieldName())
-                    .add("$L.serialize($N, $N, $N);\n\n"
-                      , instanceUtils.instanceFor(darg)
-                      , darg.fieldName()
-                      , jacksonGen
-                      , serProvider)
-                    .build()
+                  , (cb, darg) -> {
+                    final String fieldName = darg.fieldName();
+
+                    final CodeBlock.Builder prepBuilder = cb.toBuilder()
+                      .add("$N.writeFieldName($S);\n", jacksonGen, fieldName);
+
+                    final CodeBlock fieldRef = isWildcarded(deriveUtils, darg.type())
+                      ? CodeBlock.of("($T) $N"
+                      , deriveUtils.types().erasure(darg.type())
+                      , fieldName)
+
+                      : CodeBlock.of("$N", fieldName);
+
+                    return prepBuilder
+                      .add("$L.serialize(", instanceUtils.instanceFor(darg))
+                      .add(fieldRef)
+                      .add(", $N, $N);\n\n", jacksonGen, serProvider)
+                      .build();
+                  }
                   , (cb1, cb2) -> cb1.toBuilder().add(cb2).build()))
 
               .endControlFlow()
@@ -238,7 +178,7 @@ public class JacksonDerivations implements DerivatorFactory {
     , MethodSpec methodSpec) {
     final ClassName
       jsonNodeClassName =
-        ClassName.get("com.fasterxml.jackson.databind", "JsonNode"),
+      ClassName.get("com.fasterxml.jackson.databind", "JsonNode"),
       codecClassName =
         ClassName.get("com.fasterxml.jackson.core", "ObjectCodec"),
       jsonParseExceptionClassName =
@@ -249,7 +189,7 @@ public class JacksonDerivations implements DerivatorFactory {
 
     final String
       jsonNode = "jsonNode",
-      valueConstructor = "valueConstructor",
+      valueConstructor = "_tag",
       codec = "codec";
 
     return methodSpec
@@ -288,24 +228,30 @@ public class JacksonDerivations implements DerivatorFactory {
                 , (cb_, darg) -> {
                   final String dargParser = darg.fieldName() + "Parser";
 
-                  return cb_.toBuilder()
+                  final CodeBlock.Builder prepBuilder = cb_.toBuilder()
                     .add("final $T $N = $N.findPath($S).traverse($N);\n"
                       , jacksonParser.type
                       , dargParser
                       , jsonNode
                       , darg.fieldName()
                       , codec)
+                    .add("$N.nextToken();\n", dargParser);
 
-                    .add("$N.nextToken();\n", dargParser)
+                  final CodeBlock.Builder assignBuilder = isWildcarded(deriveUtils, darg.type())
+                      ? prepBuilder.add("final $T $N = ($T)\n"
+                      , darg.type()
+                      , darg.fieldName()
+                      , deriveUtils.types().erasure(darg.type()))
 
-                    .add("final $T $N =\n", darg.type(), darg.fieldName())
+                      : prepBuilder.add("final $T $N =\n", darg.type(), darg.fieldName());
+
+                  return assignBuilder
                     .indent()
                     .add("$L.deserialize($N, $N);\n\n"
                       , instanceUtils.instanceFor(darg)
                       , dargParser
                       , deserCtx)
                     .unindent()
-
                     .build();
                 }
                 , (cb1, cb2) -> cb1.toBuilder().add(cb2).build()))
@@ -335,13 +281,24 @@ public class JacksonDerivations implements DerivatorFactory {
       .build();
   }
 
-  private static TypeElement getTypeElement(DeriveUtils deriveUtils, ClassName stdSerClassName) {
-    return deriveUtils.elements().getTypeElement(stdSerClassName.toString());
+  private static TypeElement getTypeElement(DeriveUtils deriveUtils, ClassName className) {
+    return deriveUtils.elements().getTypeElement(className.toString());
   }
 
-  private static DeclaredType getDeclaredWildcardedType(DeriveUtils deriveUtils, TypeElement stdSerType) {
-    return deriveUtils.types().getDeclaredType(stdSerType
+  private static DeclaredType getDeclaredWildcardedType(DeriveUtils deriveUtils, TypeElement typeElement) {
+    return deriveUtils.types().getDeclaredType(typeElement
       , deriveUtils.types().getWildcardType(null, null));
+  }
+
+  private static boolean isWildcarded(DeriveUtils deriveUtils, TypeMirror typeMirror) {
+    final List<? extends TypeMirror> targs = deriveUtils
+      .asDeclaredType(typeMirror)
+      .map(DeclaredType::getTypeArguments)
+      .orElse(Collections.emptyList());
+
+    return targs.stream().anyMatch(tm ->
+      tm.getKind() == TypeKind.WILDCARD
+      || isWildcarded(deriveUtils, tm));
   }
 
   private interface F3<A, B, C, D> {

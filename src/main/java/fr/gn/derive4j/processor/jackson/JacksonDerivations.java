@@ -2,6 +2,7 @@ package fr.gn.derive4j.processor.jackson;
 
 import com.google.auto.service.AutoService;
 import com.squareup.javapoet.*;
+import fr.gn.derive4j.Constants.FieldNameFor;
 import fr.gn.derive4j.jackson.instances.FjTypes;
 import fr.gn.derive4j.jackson.instances.JavaTypes;
 import org.derive4j.processor.api.*;
@@ -10,9 +11,6 @@ import org.derive4j.processor.api.model.DataArgument;
 
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.DeclaredType;
-import javax.lang.model.type.TypeKind;
-import javax.lang.model.type.TypeMirror;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -35,12 +33,9 @@ public class JacksonDerivations implements DerivatorFactory {
 
       stdDeserType = getTypeElement(deriveUtils, stdDeserClassName);
 
-    final TypeElement
-      javaTypesProvider =
-      deriveUtils.elements().getTypeElement(JavaTypes.class.getCanonicalName()),
-
-      fjTypesProvider =
-        deriveUtils.elements().getTypeElement(FjTypes.class.getCanonicalName());
+    final List<TypeElement> typesProvider =
+      asList(getTypeElement(deriveUtils, ClassName.get(JavaTypes.class))
+        , getTypeElement(deriveUtils, ClassName.get(FjTypes.class)));
 
     return
       asList(selection(stdSerClassName, adt -> genInstance(deriveUtils
@@ -49,7 +44,11 @@ public class JacksonDerivations implements DerivatorFactory {
         , deriveUtils
           .types()
           .getDeclaredType(stdSerType, adt.typeConstructor().declaredType())
-        , asList(javaTypesProvider, fjTypesProvider)
+        , TypeSpec
+          .anonymousClassBuilder("$T.class, $L"
+            , deriveUtils.types().erasure(adt.typeConstructor().declaredType())
+            , true)
+        , typesProvider
         , adt
         , JacksonDerivations::genSerializerCode))
 
@@ -61,7 +60,10 @@ public class JacksonDerivations implements DerivatorFactory {
             .getDeclaredType(stdDeserType, adt.typeConstructor().typeVariables().isEmpty()
               ? adt.typeConstructor().declaredType()
               : getDeclaredWildcardedType(deriveUtils, adt.typeConstructor().typeElement()))
-          , asList(javaTypesProvider, fjTypesProvider)
+          , TypeSpec
+            .anonymousClassBuilder("$T.class"
+              , deriveUtils.types().erasure(adt.typeConstructor().declaredType()))
+          , typesProvider
           , adt
           , (drvUtils, instUtils, mspec) ->
             genDeserializerCode(drvUtils, instUtils, adt, mspec))));
@@ -71,6 +73,7 @@ public class JacksonDerivations implements DerivatorFactory {
     , ClassName instanceClassName
     , TypeElement instanceType
     , DeclaredType instanceDeclType
+    , TypeSpec.Builder instanceBuilder
     , List<TypeElement> typesProvider
     , AlgebraicDataType adt
     , F3<DeriveUtils, InstanceUtils, MethodSpec, MethodSpec> genMethodCode) {
@@ -81,9 +84,7 @@ public class JacksonDerivations implements DerivatorFactory {
         .of("($L)\n", instanceType.getSimpleName())
         .toBuilder()
         .indent()
-        .add("$L", TypeSpec
-          .anonymousClassBuilder("$T.class"
-            , adt.typeConstructor().declaredType())
+        .add("$L", instanceBuilder
 
           .superclass(TypeName.get(instanceDeclType))
 
@@ -128,7 +129,7 @@ public class JacksonDerivations implements DerivatorFactory {
 
               .add("$N.writeStringField($S, $S);\n"
                 , jacksonGen
-                , "_tag"
+                , FieldNameFor.valueConstructor
                 , dataConstructor.name())
 
               .add(dataConstructor
@@ -141,7 +142,7 @@ public class JacksonDerivations implements DerivatorFactory {
                     final CodeBlock.Builder prepBuilder = cb.toBuilder()
                       .add("$N.writeFieldName($S);\n", jacksonGen, fieldName);
 
-                    final CodeBlock fieldRef = isWildcarded(deriveUtils, darg.type())
+                    final CodeBlock fieldRef = deriveUtils.isWildcarded(darg.type())
                       ? CodeBlock.of("($T) $N"
                       , deriveUtils.types().erasure(darg.type())
                       , fieldName)
@@ -187,10 +188,7 @@ public class JacksonDerivations implements DerivatorFactory {
     final ParameterSpec jacksonParser = methodSpec.parameters.get(0);
     final ParameterSpec deserCtx = methodSpec.parameters.get(1);
 
-    final String
-      jsonNode = "jsonNode",
-      valueConstructor = "_tag",
-      codec = "codec";
+    final String jsonNode = "jsonNode", codec = "codec";
 
     return methodSpec
       .toBuilder()
@@ -201,16 +199,16 @@ public class JacksonDerivations implements DerivatorFactory {
         , jacksonParser)
 
       .addCode("final String $N = $N.findPath($S).asText();\n"
-        , valueConstructor
+        , FieldNameFor.valueConstructor
         , jsonNode
-        , valueConstructor)
+        , FieldNameFor.valueConstructor)
 
       .addCode("final $T $N = $N.getCodec();\n"
         , codecClassName
         , codec
         , jacksonParser)
 
-      .beginControlFlow("\nswitch($N)", valueConstructor)
+      .beginControlFlow("\nswitch($N)", FieldNameFor.valueConstructor)
 
       .addCode(adt
         .dataConstruction()
@@ -237,7 +235,7 @@ public class JacksonDerivations implements DerivatorFactory {
                       , codec)
                     .add("$N.nextToken();\n", dargParser);
 
-                  final CodeBlock.Builder assignBuilder = isWildcarded(deriveUtils, darg.type())
+                  final CodeBlock.Builder assignBuilder = deriveUtils.isWildcarded(darg.type())
                       ? prepBuilder.add("final $T $N = ($T)\n"
                       , darg.type()
                       , darg.fieldName()
@@ -288,17 +286,6 @@ public class JacksonDerivations implements DerivatorFactory {
   private static DeclaredType getDeclaredWildcardedType(DeriveUtils deriveUtils, TypeElement typeElement) {
     return deriveUtils.types().getDeclaredType(typeElement
       , deriveUtils.types().getWildcardType(null, null));
-  }
-
-  private static boolean isWildcarded(DeriveUtils deriveUtils, TypeMirror typeMirror) {
-    final List<? extends TypeMirror> targs = deriveUtils
-      .asDeclaredType(typeMirror)
-      .map(DeclaredType::getTypeArguments)
-      .orElse(Collections.emptyList());
-
-    return targs.stream().anyMatch(tm ->
-      tm.getKind() == TypeKind.WILDCARD
-      || isWildcarded(deriveUtils, tm));
   }
 
   private interface F3<A, B, C, D> {

@@ -1,6 +1,9 @@
 package fr.gn.derive4j.jackson.instances;
 
-import com.fasterxml.jackson.core.*;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.ObjectCodec;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
@@ -9,37 +12,22 @@ import com.fasterxml.jackson.databind.ser.std.StdSerializer;
 import fj.Unit;
 import fj.data.*;
 import fj.function.TryEffect0;
+import fr.gn.derive4j.Constants.FieldNameFor;
+import fr.gn.derive4j.Constants.FieldValueFor;
 
 import java.io.IOException;
 import java.util.Arrays;
 
+import static fr.gn.derive4j.Functions.stdDeserializer;
+import static fr.gn.derive4j.Functions.stdSerialiser;
+
 public final class FjTypes {
   private FjTypes() {}
-
-  private static final class FieldNameFor {
-    static final String
-      valueConstructor = "_tag", value = "value";
-  }
-
-  private static final class FieldValueFor {
-    static final class Option {
-      static final String
-        someValueConstructor = "some"
-        , noneValueConstructor = "none";
-    }
-
-    static final class Either {
-      static final String
-        leftValueConstructor = "left"
-        , rightValueConstructor = "right";
-    }
-  }
 
   // ## Serializers
 
   public static <T> StdSerializer<Option<T>> optionStdSerializer(StdSerializer<T> tSer) {
-    return new StdSerializer<Option<T>>(Option.class, true) {
-      public void serialize(Option<T> value, JsonGenerator gen, SerializerProvider provider) throws IOException {
+    return stdSerialiser(_class(Option.class), (value, gen, provider) -> {
         gen.writeStartObject();
 
         value
@@ -49,13 +37,11 @@ public final class FjTypes {
           .run();
 
         gen.writeEndObject();
-      }
-    };
+    });
   }
 
   public static <T> StdSerializer<List<T>> listStdSerializer(StdSerializer<T> tSer) {
-    return new StdSerializer<List<T>>(List.class, true) {
-      public void serialize(List<T> value, JsonGenerator gen, SerializerProvider provider) throws IOException {
+    return stdSerialiser(_class(List.class), (value, gen, provider) -> {
         gen.writeStartArray();
 
         value.foreachDoEffect(t -> {
@@ -67,13 +53,11 @@ public final class FjTypes {
         });
 
         gen.writeEndArray();
-      }
-    };
+    });
   }
 
   public static <A, B> StdSerializer<Either<A, B>> eitherStdSerializer(StdSerializer<A> leftSer, StdSerializer<B> rightSer) {
-    return new StdSerializer<Either<A, B>>(Either.class, true) {
-      public void serialize(Either<A, B> value, JsonGenerator gen, SerializerProvider provider) throws IOException {
+    return stdSerialiser(_class(Either.class), (value, gen, provider) -> {
         gen.writeStartObject();
 
         value
@@ -86,16 +70,36 @@ public final class FjTypes {
           .run();
 
         gen.writeEndObject();
-      }
-
-    };
+    });
   }
 
   // ## Deserializers
 
+  public static <T> StdDeserializer<Option<T>> optionStdDeserializer(StdDeserializer<T> tDeser) {
+    return stdDeserializer(_class(Option.class), (p, ctxt) -> {
+        if (!p.isExpectedStartObjectToken())
+          throw new JsonParseException(p, "Current token is not the start of an object");
+
+        final JsonNode jsonNode = p.readValueAsTree();
+        final ObjectCodec codec = p.getCodec();
+        final String valueConstructor =
+          jsonNode.findPath(FieldNameFor.valueConstructor).asText();
+
+        switch (valueConstructor) {
+
+          case FieldValueFor.Option.someValueConstructor:
+            return Option.some(readValue(ctxt, jsonNode, codec, tDeser));
+
+          case FieldValueFor.Option.noneValueConstructor:
+            return Option.none();
+
+          default: throw new JsonParseException(p, "Unknown value constructor");
+        }
+    });
+  }
+
   public static <T> StdDeserializer<List<T>> listStdDeserializer(StdDeserializer<T> tDeser) {
-    return new StdDeserializer<List<T>>(List.class) {
-      public List<T> deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+    return stdDeserializer(_class(List.class), (p, ctx) -> {
         if (!p.isExpectedStartArrayToken())
           throw new JsonParseException(p, "Current token is not the start of an array");
 
@@ -106,7 +110,7 @@ public final class FjTypes {
           final JsonParser eltParser = jsn.traverse(p.getCodec());
           try {
             eltParser.nextToken();
-            final T t = tDeser.deserialize(eltParser, ctxt);
+            final T t = tDeser.deserialize(eltParser, ctx);
             buffer.snoc(t);
           } catch (IOException e) {
             throw new RuntimeException(e);
@@ -114,13 +118,11 @@ public final class FjTypes {
         });
 
         return buffer.toList();
-      }
-    };
+    });
   }
 
   public static <A, B> StdDeserializer<Either<A, B>> eitherStdDeserializer(StdDeserializer<A> leftDeser, StdDeserializer<B> rightDeser) {
-    return new StdDeserializer<Either<A, B>>(Either.class) {
-      public Either<A, B> deserialize(JsonParser p, DeserializationContext ctxt) throws IOException, JsonProcessingException {
+    return stdDeserializer(_class(Either.class), (p, ctxt) -> {
         if (!p.isExpectedStartObjectToken())
           throw new JsonParseException(p, "Current token is not the start of an object");
 
@@ -139,8 +141,7 @@ public final class FjTypes {
 
           default: throw new JsonParseException(p, "Unknown value constructor");
         }
-      }
-    };
+    });
   }
 
 
@@ -179,5 +180,10 @@ public final class FjTypes {
 
   private static IO<Unit> fromTryEffect(TryEffect0<? extends IOException> t) {
     return () -> { t.f(); return Unit.unit(); };
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T> Class<T> _class(Class<?> clazz) {
+    return (Class<T>) clazz;
   }
 }

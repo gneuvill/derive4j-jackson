@@ -11,6 +11,7 @@ import org.derive4j.processor.api.model.DataArgument;
 
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.WildcardType;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -22,8 +23,14 @@ public class JacksonDerivations implements DerivatorFactory {
   @Override
   public List<DerivatorSelection> derivators(DeriveUtils deriveUtils) {
     final ClassName
+      jsonSerClassName =
+        ClassName.get("com.fasterxml.jackson.databind", "JsonSerializer"),
+
+      jsonDeserClassName =
+        ClassName.get("com.fasterxml.jackson.databind", "JsonDeserializer"),
+
       stdSerClassName =
-      ClassName.get("com.fasterxml.jackson.databind.ser.std", "StdSerializer"),
+        ClassName.get("com.fasterxml.jackson.databind.ser.std", "StdSerializer"),
 
       stdDeserClassName =
         ClassName.get("com.fasterxml.jackson.databind.deser.std", "StdDeserializer");
@@ -38,7 +45,8 @@ public class JacksonDerivations implements DerivatorFactory {
         , getTypeElement(deriveUtils, ClassName.get(FjTypes.class)));
 
     return
-      asList(selection(stdSerClassName, adt -> genInstance(deriveUtils
+      asList(selection(jsonSerClassName, adt -> genInstance(deriveUtils
+        , jsonSerClassName
         , stdSerClassName
         , stdSerType
         , deriveUtils
@@ -52,7 +60,8 @@ public class JacksonDerivations implements DerivatorFactory {
         , adt
         , JacksonDerivations::genSerializerCode))
 
-        , selection(stdDeserClassName, adt -> genInstance(deriveUtils
+        , selection(jsonDeserClassName, adt -> genInstance(deriveUtils
+          , jsonDeserClassName
           , stdDeserClassName
           , stdDeserType
           , deriveUtils
@@ -71,8 +80,9 @@ public class JacksonDerivations implements DerivatorFactory {
 
   private static DeriveResult<DerivedCodeSpec> genInstance(DeriveUtils deriveUtils
     , ClassName instanceClassName
-    , TypeElement instanceType
-    , DeclaredType instanceDeclType
+    , ClassName instanceImplClassName
+    , TypeElement instanceImplType
+    , DeclaredType instanceImplDeclType
     , TypeSpec.Builder instanceBuilder
     , List<TypeElement> typesProvider
     , AlgebraicDataType adt
@@ -81,19 +91,19 @@ public class JacksonDerivations implements DerivatorFactory {
       , instanceClassName
       , typesProvider
       , instanceUtils -> instanceUtils.generateInstanceFactory(CodeBlock
-        .of("($L)\n", instanceType.getSimpleName())
+        .of("($L)\n", instanceImplType.getSimpleName())
         .toBuilder()
         .indent()
         .add("$L", instanceBuilder
 
-          .superclass(TypeName.get(instanceDeclType))
+          .superclass(TypeName.get(instanceImplDeclType))
 
           .addMethods(deriveUtils
-            .allAbstractMethods(instanceType)
+            .allAbstractMethods(instanceImplType)
             .stream()
             .map(m -> {
               final MethodSpec methodSpec = deriveUtils
-                .overrideMethodBuilder(m, instanceDeclType)
+                .overrideMethodBuilder(m, instanceImplDeclType)
                 .build();
 
               return genMethodCode.f(deriveUtils, instanceUtils, methodSpec);
@@ -198,7 +208,7 @@ public class JacksonDerivations implements DerivatorFactory {
         , jsonNode
         , jacksonParser)
 
-      .addCode("final String $N = $N.findPath($S).asText();\n"
+      .addCode("final String $N = $N.path($S).asText();\n"
         , FieldNameFor.valueConstructor
         , jsonNode
         , FieldNameFor.valueConstructor)
@@ -227,7 +237,7 @@ public class JacksonDerivations implements DerivatorFactory {
                   final String dargParser = darg.fieldName() + "Parser";
 
                   final CodeBlock.Builder prepBuilder = cb_.toBuilder()
-                    .add("final $T $N = $N.findPath($S).traverse($N);\n"
+                    .add("final $T $N = $N.path($S).traverse($N);\n"
                       , jacksonParser.type
                       , dargParser
                       , jsonNode
@@ -236,12 +246,12 @@ public class JacksonDerivations implements DerivatorFactory {
                     .add("$N.nextToken();\n", dargParser);
 
                   final CodeBlock.Builder assignBuilder = deriveUtils.isWildcarded(darg.type())
-                      ? prepBuilder.add("final $T $N = ($T)\n"
-                      , darg.type()
-                      , darg.fieldName()
-                      , deriveUtils.types().erasure(darg.type()))
+                    ? prepBuilder.add("final $T $N = ($T)\n"
+                    , darg.type()
+                    , darg.fieldName()
+                    , deriveUtils.types().erasure(darg.type()))
 
-                      : prepBuilder.add("final $T $N =\n", darg.type(), darg.fieldName());
+                    : prepBuilder.add("final $T $N =\n", darg.type(), darg.fieldName());
 
                   return assignBuilder
                     .indent()
@@ -284,8 +294,13 @@ public class JacksonDerivations implements DerivatorFactory {
   }
 
   private static DeclaredType getDeclaredWildcardedType(DeriveUtils deriveUtils, TypeElement typeElement) {
-    return deriveUtils.types().getDeclaredType(typeElement
-      , deriveUtils.types().getWildcardType(null, null));
+    final WildcardType[] wildcardTypes = typeElement
+      .getTypeParameters()
+      .stream()
+      .map(__ -> deriveUtils.types().getWildcardType(null, null))
+      .toArray(WildcardType[]::new);
+
+    return deriveUtils.types().getDeclaredType(typeElement, wildcardTypes);
   }
 
   private interface F3<A, B, C, D> {

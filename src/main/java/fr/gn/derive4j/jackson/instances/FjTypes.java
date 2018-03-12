@@ -4,11 +4,9 @@ import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.ObjectCodec;
-import com.fasterxml.jackson.databind.DeserializationContext;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
-import com.fasterxml.jackson.databind.ser.std.StdSerializer;
+import fj.Ord;
 import fj.Unit;
 import fj.data.*;
 import fj.function.TryEffect0;
@@ -26,7 +24,7 @@ public final class FjTypes {
 
   // ## Serializers
 
-  public static <T> StdSerializer<Option<T>> optionStdSerializer(StdSerializer<T> tSer) {
+  public static <T> JsonSerializer<Option<T>> optionStdSerializer(JsonSerializer<T> tSer) {
     return stdSerialiser(_class(Option.class), (value, gen, provider) -> {
         gen.writeStartObject();
 
@@ -40,7 +38,7 @@ public final class FjTypes {
     });
   }
 
-  public static <T> StdSerializer<List<T>> listStdSerializer(StdSerializer<T> tSer) {
+  public static <T> JsonSerializer<List<T>> listStdSerializer(JsonSerializer<T> tSer) {
     return stdSerialiser(_class(List.class), (value, gen, provider) -> {
         gen.writeStartArray();
 
@@ -56,7 +54,7 @@ public final class FjTypes {
     });
   }
 
-  public static <A, B> StdSerializer<Either<A, B>> eitherStdSerializer(StdSerializer<A> leftSer, StdSerializer<B> rightSer) {
+  public static <A, B> JsonSerializer<Either<A, B>> eitherStdSerializer(JsonSerializer<A> leftSer, JsonSerializer<B> rightSer) {
     return stdSerialiser(_class(Either.class), (value, gen, provider) -> {
         gen.writeStartObject();
 
@@ -73,9 +71,14 @@ public final class FjTypes {
     });
   }
 
+  public static <T> JsonSerializer<Set<T>> setStdSerializer(JsonSerializer<T> tSer) {
+    return stdSerialiser(_class(Set.class), (value, gen, provider) ->
+      listStdSerializer(tSer).serialize(value.toList(), gen, provider));
+  }
+
   // ## Deserializers
 
-  public static <T> StdDeserializer<Option<T>> optionStdDeserializer(StdDeserializer<T> tDeser) {
+  public static <T> JsonDeserializer<Option<T>> optionStdDeserializer(JsonDeserializer<T> tDeser) {
     return stdDeserializer(_class(Option.class), (p, ctxt) -> {
         if (!p.isExpectedStartObjectToken())
           throw new JsonParseException(p, "Current token is not the start of an object");
@@ -98,7 +101,7 @@ public final class FjTypes {
     });
   }
 
-  public static <T> StdDeserializer<List<T>> listStdDeserializer(StdDeserializer<T> tDeser) {
+  public static <T> JsonDeserializer<List<T>> listStdDeserializer(JsonDeserializer<T> tDeser) {
     return stdDeserializer(_class(List.class), (p, ctx) -> {
         if (!p.isExpectedStartArrayToken())
           throw new JsonParseException(p, "Current token is not the start of an array");
@@ -121,7 +124,7 @@ public final class FjTypes {
     });
   }
 
-  public static <A, B> StdDeserializer<Either<A, B>> eitherStdDeserializer(StdDeserializer<A> leftDeser, StdDeserializer<B> rightDeser) {
+  public static <A, B> JsonDeserializer<Either<A, B>> eitherStdDeserializer(JsonDeserializer<A> leftDeser, JsonDeserializer<B> rightDeser) {
     return stdDeserializer(_class(Either.class), (p, ctxt) -> {
         if (!p.isExpectedStartObjectToken())
           throw new JsonParseException(p, "Current token is not the start of an object");
@@ -144,6 +147,11 @@ public final class FjTypes {
     });
   }
 
+  public static <T> JsonDeserializer<Set<T>> setStdDeserializer(Ord<T> tOrd, JsonDeserializer<T> tDeser) {
+    return stdDeserializer(_class(Set.class), (p, ctxt) ->
+      Set.iterableSet(tOrd, listStdDeserializer(tDeser).deserialize(p, ctxt)));
+  }
+
 
   private static <T> IO<Unit> writeValueConstructor(JsonGenerator gen, String valueConstructor) {
     return fromTryEffect(() -> {
@@ -153,7 +161,7 @@ public final class FjTypes {
 
   private static <T> IO<Unit> writeValue(JsonGenerator gen
     , SerializerProvider provider
-    , StdSerializer<T> ser
+    , JsonSerializer<T> ser
     , T left) {
     return fromTryEffect(() -> {
       gen.writeFieldName(FieldNameFor.value);
@@ -164,7 +172,7 @@ public final class FjTypes {
   private static <T> T readValue(DeserializationContext ctxt
     , JsonNode jsonNode
     , ObjectCodec codec
-    , StdDeserializer<T> deser) throws IOException {
+    , JsonDeserializer<T> deser) throws IOException {
     final JsonParser valueParser = jsonNode.findPath(FieldNameFor.value).traverse(codec);
     valueParser.nextToken();
     return deser.deserialize(valueParser, ctxt);

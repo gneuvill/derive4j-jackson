@@ -1,8 +1,7 @@
-package fr.gn.derive4j;
+package fr.gn.derive4j.jackson.instances;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
@@ -14,10 +13,10 @@ import fj.function.TryEffect3;
 
 import java.io.IOException;
 
-public final class Functions {
+final class Functions {
   private Functions() {}
 
-  public static <T> StdSerializer<T> stdSerialiser(Class<T> clazz
+  static <T> StdSerializer<T> stdSerialiser(Class<T> clazz
     , TryEffect3<T, JsonGenerator, SerializerProvider, IOException> effect) {
     return new StdSerializer<T>(clazz) {
       @Override
@@ -27,21 +26,21 @@ public final class Functions {
     };
   }
 
-  public static <T> StdSerializer<T> stdSerializer_(Class<T> clazz, TryEffect2<T, JsonGenerator, IOException> effect) {
+  static <T> StdSerializer<T> stdSerializer_(Class<T> clazz, TryEffect2<T, JsonGenerator, IOException> effect) {
     return stdSerialiser(clazz, (value, gen, prov) -> effect.f(value, gen));
   }
 
-  public static <T> StdDeserializer<T> stdDeserializer(Class<T> clazz
+  static <T> StdDeserializer<T> stdDeserializer(Class<T> clazz
     , Try2<JsonParser, DeserializationContext, T, IOException> effect) {
     return new StdDeserializer<T>(clazz) {
       @Override
-      public T deserialize(JsonParser p, DeserializationContext ctxt) throws IOException, JsonProcessingException {
+      public T deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
         return effect.f(p, ctxt);
       }
     };
   }
 
-  public static <T> StdDeserializer<T> stdDeserializer_(Class<T> clazz, Try1<JsonParser, T, IOException> effect) {
+  static <T> StdDeserializer<T> stdDeserializer_(Class<T> clazz, Try1<JsonParser, T, IOException> effect) {
     return stdDeserializer(clazz, (p, ctx) -> effect.f(p));
   }
 }

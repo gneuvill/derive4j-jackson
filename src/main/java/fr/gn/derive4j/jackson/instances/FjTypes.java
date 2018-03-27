@@ -5,7 +5,6 @@ import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.ObjectCodec;
 import com.fasterxml.jackson.databind.*;
-import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import fj.Ord;
 import fj.Unit;
 import fj.data.*;
@@ -16,8 +15,8 @@ import fr.gn.derive4j.Constants.FieldValueFor;
 import java.io.IOException;
 import java.util.Arrays;
 
-import static fr.gn.derive4j.Functions.stdDeserializer;
-import static fr.gn.derive4j.Functions.stdSerialiser;
+import static fr.gn.derive4j.jackson.instances.Functions.stdDeserializer;
+import static fr.gn.derive4j.jackson.instances.Functions.stdSerialiser;
 
 public final class FjTypes {
   private FjTypes() {}

@@ -7,8 +7,8 @@ import com.fasterxml.jackson.databind.JsonSerializer;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 
-import static fr.gn.derive4j.Functions.stdDeserializer_;
-import static fr.gn.derive4j.Functions.stdSerializer_;
+import static fr.gn.derive4j.jackson.instances.Functions.stdDeserializer_;
+import static fr.gn.derive4j.jackson.instances.Functions.stdSerializer_;
 
 public final class JavaTypes {
   private JavaTypes() {}

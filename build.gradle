@@ -1,25 +1,23 @@
 plugins {
-    id "net.ltgt.apt" version "0.10"
+    id "net.ltgt.apt" version "0.15"
+    id "net.researchgate.release" version "2.6.0"
 }
 
-group "fr.gn"
-version "0.1-SNAPSHOT"
+wrapper {
+    gradleVersion = "4.6"
+}
 
-apply plugin: "net.ltgt.apt"
+group = "fr.gn"
+version = "0.1-SNAPSHOT"
+
+apply plugin: "net.ltgt.apt-idea"
 apply plugin: "java"
-apply plugin: "idea"
 apply plugin: "maven"
 apply plugin: "osgi"
 
-sourceCompatibility = 1.8
+sourceCompatibility = "1.8"
 
 ext {
-    isSnapshot = true
-    d4jFJBaseVersion = "0.2"
-
-    snapshotAppendix = "-SNAPSHOT"
-    d4jFJVersion = d4jFJBaseVersion + (isSnapshot ? snapshotAppendix : "")
-
     dependencyAutoService = "com.google.auto.service:auto-service:1.0-rc2"
 }
 
@@ -28,16 +26,36 @@ repositories {
     jcenter()
     mavenCentral()
     maven {
-        url "https://plugins.gradle.org/m2/"
+        url = "https://plugins.gradle.org/m2/"
     }
 }
 
 dependencies {
     compileOnly "org.derive4j:derive4j-processor-api:0.12.4-SNAPSHOT"
     compileOnly dependencyAutoService
-    apt dependencyAutoService
+    annotationProcessor dependencyAutoService
 
-    compileOnly "com.fasterxml.jackson.core:jackson-databind:2.8.9"
-    compileOnly "org.functionaljava:functionaljava-java8:4.7"
-    compileOnly "org.derive4j.hkt:hkt:0.9.2"
+    compile "com.fasterxml.jackson.core:jackson-databind:2.8.9"
+    compile "org.functionaljava:functionaljava-java8:4.7"
+    compile "org.derive4j.hkt:hkt:0.9.2"
+}
+
+task javadocJar(type: Jar, dependsOn: "javadoc") {
+    classifier = 'javadoc'
+    from "build/docs/javadoc"
+}
+
+task sourcesJar(type: Jar) {
+    from sourceSets.main.allSource
+    classifier = 'sources'
+}
+
+tasks.withType(JavaCompile) {
+    options.compilerArgs << "-Xlint:all"
+}
+
+artifacts {
+    archives jar
+    archives javadocJar
+    archives sourcesJar
 }

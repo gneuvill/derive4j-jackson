@@ -13,6 +13,7 @@ import fj.function.TryEffect3;
 
 import java.io.IOException;
 
+@SuppressWarnings("serial")
 final class Functions {
   private Functions() {}
 
